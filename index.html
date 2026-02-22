@@ -3,82 +3,109 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>股票指標查詢</title>
+    <title>台股財報監控</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background-color: #f4f7f9; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .card { width: 100%; max-width: 450px; border: none; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
-        .btn-query { border-radius: 0 10px 10px 0; }
-        .input-query { border-radius: 10px 0 0 10px; }
-        .data-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #eee; }
-        .label { color: #666; }
-        .value { font-weight: bold; color: #007bff; }
+        body { background: #f0f2f5; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+        .card { width: 100%; max-width: 450px; border-radius: 20px; border: none; box-shadow: 0 15px 35px rgba(0,0,0,0.1); }
+        .result-box { background: #fff; border-radius: 15px; padding: 20px; margin-top: 20px; border: 1px solid #eee; }
+        .data-row { display: flex; justify-content: space-between; margin-bottom: 15px; }
+        .label { color: #888; font-size: 0.9rem; }
+        .value { font-weight: bold; font-size: 1.1rem; color: #333; }
+        .badge-pe { background: #e7f3ff; color: #007bff; padding: 5px 10px; border-radius: 8px; }
+        .badge-gm { background: #e6fffa; color: #2dcc70; padding: 5px 10px; border-radius: 8px; }
     </style>
 </head>
 <body>
 
 <div class="card p-4">
-    <h4 class="text-center fw-bold mb-4">股票指標查詢</h4>
+    <h4 class="text-center fw-bold mb-4">台股即時指標查詢</h4>
     
-    <div class="input-group mb-3">
-        <input type="text" id="symbol" class="form-control input-query" placeholder="輸入代號 (如: 2330 或 AAPL)">
-        <button class="btn btn-primary btn-query" onclick="getData()">查詢</button>
+    <div class="input-group mb-3 shadow-sm">
+        <input type="text" id="stockInput" class="form-control" placeholder="例: 2330, 2454, 2317">
+        <button class="btn btn-primary px-4" onclick="queryStock()">查詢</button>
     </div>
 
-    <div id="loader" class="text-center my-3" style="display:none;">
-        <div class="spinner-border spinner-border-sm text-primary"></div>
+    <div id="loading" class="text-center my-3" style="display:none;">
+        <div class="spinner-grow text-primary" role="status"></div>
+        <p class="text-muted small mt-2">正在抓取財報數據...</p>
     </div>
 
-    <div id="result" style="display:none;">
-        <div class="data-item"><span class="label">名稱</span><span id="name" class="value">--</span></div>
-        <div class="data-item"><span class="label">本益比 (PE)</span><span id="pe" class="value text-danger">--</span></div>
-        <div class="data-item"><span class="label">毛利率 (GM)</span><span id="gm" class="value text-success">--</span></div>
+    <div id="resultArea" style="display:none;">
+        <div class="result-box shadow-sm">
+            <div class="data-row">
+                <span class="label">股票代號</span>
+                <span id="resId" class="value text-dark">--</span>
+            </div>
+            <hr>
+            <div class="data-row">
+                <span class="label">本益比 (PE)</span>
+                <span id="resPE" class="badge-pe fw-bold">--</span>
+            </div>
+            <div class="data-row">
+                <span class="label">毛利率 (GM)</span>
+                <span id="resGM" class="badge-gm fw-bold">--</span>
+            </div>
+        </div>
+        <p class="text-center text-muted x-small mt-3" style="font-size: 11px;">數據來源: FinMind 開放 API</p>
     </div>
 
-    <div id="err" class="alert alert-danger mt-3" style="display:none; font-size: 14px;"></div>
+    <div id="errorArea" class="alert alert-danger mt-3" style="display:none; font-size: 14px;"></div>
 </div>
 
 <script>
-    async function getData() {
-        let sym = document.getElementById('symbol').value.trim().toUpperCase();
-        if (!sym) return;
+    async function queryStock() {
+        const id = document.getElementById('stockInput').value.trim();
+        const load = document.getElementById('loading');
+        const res = document.getElementById('resultArea');
+        const err = document.getElementById('errorArea');
 
-        // 台股自動補點
-        if (/^\d+$/.test(sym)) sym += ".TW";
+        if (!id) return;
 
-        const loader = document.getElementById('loader');
-        const result = document.getElementById('result');
-        const err = document.getElementById('err');
-
-        loader.style.display = 'block';
-        result.style.display = 'none';
+        // 重置 UI
+        load.style.display = 'block';
+        res.style.display = 'none';
         err.style.display = 'none';
 
         try {
-            // 改用一個保證 HTTPS 友好的公共查詢接口
-            const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=summaryDetail,financialData`;
-            const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+            // 同時請求本益比和綜合損益表數據
+            // FinMind API 對瀏覽器請求非常友善，不會被 CORS 擋掉
+            const [peResp, gmResp] = await Promise.all([
+                fetch(`https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPBR&data_id=${id}`),
+                fetch(`https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockFinancialStatements&data_id=${id}`)
+            ]);
 
-            const response = await fetch(proxy);
-            const rawData = await response.json();
-            const data = JSON.parse(rawData.contents);
+            const peJson = await peResp.json();
+            const gmJson = await gmResp.json();
 
-            if (data.quoteSummary && data.quoteSummary.result) {
-                const res = data.quoteSummary.result[0];
+            if (peJson.data && peJson.data.length > 0) {
+                // 1. 取得最新的 PE
+                const lastPE = peJson.data[peJson.data.length - 1].PE;
                 
-                document.getElementById('name').innerText = sym;
-                document.getElementById('pe').innerText = res.summaryDetail.trailingPE?.fmt || "N/A";
-                document.getElementById('gm').innerText = res.financialData.grossMargins?.fmt || "N/A";
+                // 2. 取得毛利率 (計算最近一季的 Revenue 與 GrossProfit)
+                const financialData = gmJson.data;
+                const revenue = financialData.findLast(d => d.type === 'Revenue')?.value || 0;
+                const grossProfit = financialData.findLast(d => d.type === 'GrossProfit')?.value || 0;
+                
+                let gmStr = "暫無數據";
+                if (revenue !== 0) {
+                    gmStr = ((grossProfit / revenue) * 100).toFixed(2) + "%";
+                }
 
-                loader.style.display = 'none';
-                result.style.display = 'block';
+                // 顯示數據
+                document.getElementById('resId').innerText = id;
+                document.getElementById('resPE').innerText = lastPE + " 倍";
+                document.getElementById('resGM').innerText = gmStr;
+
+                load.style.display = 'none';
+                res.style.display = 'block';
             } else {
-                throw new Error("找不到代碼，請檢查格式 (例: 2330)");
+                throw new Error("查無此代號，請確認是否為台股編號。");
             }
         } catch (e) {
-            loader.style.display = 'none';
+            load.style.display = 'none';
             err.style.display = 'block';
-            err.innerText = "讀取失敗: " + e.message;
+            err.innerText = "讀取錯誤: " + e.message;
         }
     }
 </script>
