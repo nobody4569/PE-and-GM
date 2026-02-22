@@ -3,89 +3,75 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>台美股即時數據看板</title>
+    <title>台美股財務指標查詢</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background-color: #f8f9fa; padding: 20px; font-family: sans-serif; }
-        .container { max-width: 800px; background: white; padding: 30px; border-radius: 15px; shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        .result-table { margin-top: 20px; display: none; }
-        #loading { display: none; }
+        body { background-color: #f4f7f6; padding: 20px; }
+        .container { max-width: 600px; background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        .loading { display: none; }
+        .data-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
+        .data-label { font-weight: bold; color: #555; }
+        .data-value { color: #007bff; font-family: monospace; font-size: 1.1em; }
     </style>
 </head>
 <body>
 
-<div class="container shadow-sm">
-    <h2 class="text-center mb-4">📈 股市指標查詢</h2>
-    <p class="text-muted text-center small">免 API Key 版本 | 支援美股、台股 (加 .TW)</p>
-
+<div class="container mt-5">
+    <h3 class="text-center mb-4">📈 台美股指標 (GitHub 版)</h3>
+    
     <div class="input-group mb-3">
-        <input type="text" id="symbolInput" class="form-control" placeholder="輸入代碼，如: AAPL 或 2330.TW">
-        <button class="btn btn-primary" onclick="getData()">查詢</button>
+        <input type="text" id="symbolInput" class="form-control" placeholder="例: AAPL 或 2330.TW">
+        <button class="btn btn-primary" onclick="fetchData()">查詢</button>
     </div>
+    <p class="text-muted small text-center">台股請務必加 .TW (上市) 或 .TWO (上櫃)</p>
 
     <div id="loading" class="text-center my-3">
-        <div class="spinner-border spinner-border-sm text-primary"></div> 數據讀取中...
+        <div class="spinner-border text-primary" role="status"></div>
+        <div class="mt-2">正在透過代理伺服器讀取數據...</div>
     </div>
 
-    <div id="resultArea" class="result-table">
-        <table class="table table-bordered align-middle">
-            <thead class="table-dark">
-                <tr>
-                    <th>項目</th>
-                    <th>數值</th>
-                </tr>
-            </thead>
-            <tbody id="infoTable">
-                </tbody>
-        </table>
+    <div id="resultDisplay" style="display:none;">
+        <div class="data-row"><span class="data-label">股票代碼</span><span id="resSymbol" class="data-value"></span></div>
+        <div class="data-row"><span class="data-label">目前股價</span><span id="resPrice" class="data-value"></span></div>
+        <div class="data-row"><span class="data-label">本益比 (PE)</span><span id="resPE" class="data-value"></span></div>
+        <div class="data-row"><span class="data-label">毛利率 (GM)</span><span id="resGM" class="data-value"></span></div>
     </div>
 </div>
 
 <script>
-    async function getData() {
+    async function fetchData() {
         let symbol = document.getElementById('symbolInput').value.trim().toUpperCase();
         if (!symbol) return alert("請輸入代碼");
-        
-        // 自動修飾台股代號
-        if (/^\d+$/.test(symbol)) symbol += ".TW";
 
         const loading = document.getElementById('loading');
-        const resultArea = document.getElementById('resultArea');
-        const infoTable = document.getElementById('infoTable');
-
+        const resultDisplay = document.getElementById('resultDisplay');
+        
         loading.style.display = 'block';
-        resultArea.style.display = 'none';
+        resultDisplay.style.display = 'none';
+
+        // 核心修正：使用 cors-anywhere 或類似代理
+        // 這裡使用 Yahoo Finance 公開的 Summary API
+        const baseUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=summaryDetail,financialData`;
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(baseUrl)}`;
 
         try {
-            // 使用 Yahoo Finance 的公開原始資料路徑 (透過 Proxy 避開 CORS)
-            const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`);
-            const data = await response.json();
+            const response = await fetch(proxyUrl);
+            if (!response.ok) throw new Error("代碼錯誤或代理伺服器忙碌");
             
-            // 抓取本益比與基本面資料
-            const metaRes = await fetch(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=summaryDetail,financialData,defaultKeyStatistics`);
-            const metaData = await metaRes.json();
+            const json = await response.json();
+            const data = json.quoteSummary.result[0];
 
-            const quote = metaData.quoteSummary.result[0];
-            
-            const price = quote.financialData.currentPrice.fmt || "N/A";
-            const pe = quote.summaryDetail.trailingPE?.fmt || "N/A";
-            const gm = quote.financialData.grossMargins?.fmt || "N/A";
-            const name = symbol;
-
-            infoTable.innerHTML = `
-                <tr><td>股票名稱</td><td><strong>${symbol}</strong></td></tr>
-                <tr><td>目前股價</td><td><span class="text-primary">${price}</span></td></tr>
-                <tr><td>本益比 (PE)</td><td><span class="badge bg-info text-dark">${pe}</span></td></tr>
-                <tr><td>毛利率 (GM)</td><td><span class="badge bg-success">${gm}</span></td></tr>
-            `;
+            document.getElementById('resSymbol').innerText = symbol;
+            document.getElementById('resPrice').innerText = data.financialData.currentPrice?.fmt || "N/A";
+            document.getElementById('resPE').innerText = data.summaryDetail.trailingPE?.fmt || "N/A";
+            document.getElementById('resGM').innerText = data.financialData.grossMargins?.fmt || "N/A";
 
             loading.style.display = 'none';
-            resultArea.style.display = 'block';
-
+            resultDisplay.style.display = 'block';
         } catch (error) {
             loading.style.display = 'none';
-            alert("查詢失敗！請確認代碼是否正確（台股請加 .TW）\n或該股票暫無數據。");
             console.error(error);
+            alert("查詢失敗：\n1. 請確認代碼正確 (例: 2330.TW)\n2. 代理伺服器可能暫時斷線，請稍後再試");
         }
     }
 </script>
