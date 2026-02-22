@@ -3,105 +3,109 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>台美股即時數據監控</title>
+    <title>台美股財務監控</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background-color: #f0f2f5; padding-top: 30px; }
-        .card { border-radius: 15px; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        .table-container { background: white; border-radius: 15px; padding: 20px; margin-top: 20px; }
-        #loader { display: none; }
+        body { background-color: #f4f7f6; padding: 20px; }
+        .main-card { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 25px; }
+        .loading-spinner { display: none; margin-left: 10px; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="text-center mb-4">
-        <h2 class="fw-bold">📊 台美股財報監測儀</h2>
-        <p class="text-muted">支援美股 (AAPL) 與 台股 (2330)</p>
-    </div>
-
-    <div class="card p-4 mb-4">
-        <div class="input-group">
-            <input type="text" id="stockInput" class="form-control" placeholder="輸入代碼，例如: 2330, TSLA">
-            <button class="btn btn-primary" onclick="startQuery()">查詢</button>
+<div class="container" style="max-width: 900px;">
+    <div class="main-card">
+        <h3 class="mb-4 text-center">📈 股票本益比與毛利率查詢</h3>
+        
+        <div class="input-group mb-3">
+            <input type="text" id="stockInput" class="form-control" placeholder="輸入代碼 (例: AAPL, 2330, NVDA)">
+            <button class="btn btn-dark" type="button" onclick="startQuery()">搜尋股票</button>
         </div>
-        <div id="loader" class="text-primary mt-2 small">正在連線至 API 獲取最新數據...</div>
-    </div>
+        
+        <div id="statusMsg" class="text-muted small mb-3">輸入台股代號會自動轉換為 .TW 格式</div>
+        <div id="loader" class="loading-spinner spinner-border spinner-border-sm text-primary"></div>
 
-    <div class="table-container shadow-sm">
-        <table class="table table-hover">
-            <thead class="table-dark">
-                <tr>
-                    <th>代碼</th>
-                    <th>名稱</th>
-                    <th>股價</th>
-                    <th>本益比 (PE)</th>
-                    <th>毛利率 (GM)</th>
-                </tr>
-            </thead>
-            <tbody id="resultBody">
-                </tbody>
-        </table>
+        <div class="table-responsive">
+            <table class="table table-striped align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>代碼</th>
+                        <th>公司</th>
+                        <th>現價</th>
+                        <th>本益比 (PE)</th>
+                        <th>毛利率 (GM)</th>
+                    </tr>
+                </thead>
+                <tbody id="resultBody">
+                    </tbody>
+            </table>
+        </div>
     </div>
 </div>
 
 <script>
-    // 你的專屬 API Key
     const API_KEY = 'qdDcU9HKLVfXbxgTCExTENKlkzlCJNU3';
 
     async function startQuery() {
-        const input = document.getElementById('stockInput').value;
+        const input = document.getElementById('stockInput').value.trim();
         const loader = document.getElementById('loader');
         const tableBody = document.getElementById('resultBody');
         
-        if (!input.trim()) return alert("請輸入股票代碼");
+        if (!input) {
+            alert("請先輸入代碼");
+            return;
+        }
 
-        const symbols = input.split(',').map(s => {
+        // 處理輸入：將中文逗號轉英文，並自動補 .TW
+        const symbols = input.replace(/，/g, ',').split(',').map(s => {
             let sym = s.trim().toUpperCase();
-            // 自動修正台股代碼：若只有數字則補 .TW
             return /^\d+$/.test(sym) ? sym + ".TW" : sym;
         });
 
-        loader.style.display = 'block';
+        loader.style.display = 'inline-block';
 
-        for (let symbol of symbols) {
+        for (const symbol of symbols) {
             try {
-                // 使用 Promise.allSettled 確保即使一個失敗，其他也能跑
-                const [quoteRes, ratioRes] = await Promise.all([
-                    fetch(`https://financialmodelingprep.com/api/v3/quote/${symbol}?apikey=${API_KEY}`),
-                    fetch(`https://financialmodelingprep.com/api/v3/ratios-ttm/${symbol}?apikey=${API_KEY}`)
-                ]);
+                // 1. 抓取股價與本益比
+                const quoteUrl = `https://financialmodelingprep.com/api/v3/quote/${symbol}?apikey=${API_KEY}`;
+                const qRes = await fetch(quoteUrl);
+                const qData = await qRes.json();
 
-                const quoteData = await quoteRes.json();
-                const ratioData = await ratioRes.json();
-
-                if (quoteData && quoteData.length > 0) {
-                    const s = quoteData[0];
-                    const r = (ratioData && ratioData.length > 0) ? ratioData[0] : {};
-
-                    // 數值處理防呆
-                    const pe = s.pe ? s.pe.toFixed(2) : "N/A";
-                    const gm = r.grossProfitMarginTTM ? (r.grossProfitMarginTTM * 100).toFixed(2) + "%" : "N/A";
-
-                    const row = `
-                        <tr>
-                            <td><strong>${s.symbol}</strong></td>
-                            <td>${s.name || '---'}</td>
-                            <td>${s.price} <small>${s.currency || ''}</small></td>
-                            <td><span class="badge bg-info text-dark">${pe}</span></td>
-                            <td><span class="badge bg-success">${gm}</span></td>
-                        </tr>
-                    `;
-                    tableBody.insertAdjacentHTML('afterbegin', row);
-                } else {
-                    console.warn(`找不到代碼 ${symbol} 的資料`);
+                if (!qData || qData.length === 0) {
+                    alert(`找不到代碼 ${symbol} 的報價。請注意：免費 API 可能不支援部分台股。`);
+                    continue;
                 }
+
+                const s = qData[0];
+
+                // 2. 抓取毛利率 (TTM)
+                const ratioUrl = `https://financialmodelingprep.com/api/v3/ratios-ttm/${symbol}?apikey=${API_KEY}`;
+                const rRes = await fetch(ratioUrl);
+                const rData = await rRes.json();
+                const r = (rData && rData.length > 0) ? rData[0] : {};
+
+                // 渲染畫面
+                const pe = s.pe ? s.pe.toFixed(2) : "N/A";
+                const gm = r.grossProfitMarginTTM ? (r.grossProfitMarginTTM * 100).toFixed(2) + "%" : "N/A";
+
+                const rowHtml = `
+                    <tr>
+                        <td><strong>${s.symbol}</strong></td>
+                        <td>${s.name || '---'}</td>
+                        <td>${s.price} ${s.currency || ''}</td>
+                        <td><span class="badge bg-primary">${pe}</span></td>
+                        <td><span class="badge bg-success">${gm}</span></td>
+                    </tr>
+                `;
+                tableBody.insertAdjacentHTML('afterbegin', rowHtml);
+
             } catch (err) {
-                console.error("查詢出錯:", err);
+                console.error("Error fetching " + symbol, err);
+                alert(`${symbol} 讀取失敗，可能是 API 次數達到上限。`);
             }
         }
         loader.style.display = 'none';
-        document.getElementById('stockInput').value = ''; // 清空輸入框
+        document.getElementById('stockInput').value = '';
     }
 </script>
 
